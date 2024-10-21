@@ -1,32 +1,30 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import requests
+
 app = FastAPI()
 
 # 対応する言語リスト
 supported_languages = ['en', 'ja']
 
-def create_error_response(detail: str):
-    error_response = {"status": f"error", "message": detail}
-    print(error_response)  # エラーレスポンスを出力
-    return error_response
+def create_error_response(detail):
+    return {"status": "error", "message": detail}
 
-# 自作のAPIのエンドポイント
 @app.post("/translate")
-async def translate(data: dict):
+def translate_text(data: dict):
     target_lang = data.get("target_lang")
     text = data.get("text")
 
     # target_langが未入力の場合
     if not target_lang:
-        return create_error_response(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
+        return create_error_response(f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
 
     # 対応していない言語がリクエストされた場合
     if target_lang not in supported_languages:
-        return create_error_response(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
+        return create_error_response(f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
 
     # 翻訳するテキストが未入力の場合
     if not text:
-        return create_error_response(400, "textを入力してください。")
+        return create_error_response("textを入力してください。")
 
     # モックAPIのURL（モックAPIにリクエストを転送）
     mock_api_url = "http://localhost:8001/v1/chat/completions"
@@ -51,7 +49,6 @@ async def translate(data: dict):
             translated_text = response_data["choices"][0]["message"]["content"]
             return {"status": "success", "translated_text": translated_text}
         else:
-            # ステータスコードに応じたエラーメッセージを設定
             if response.status_code == 400:
                 error_message = "外部APIに不正なリクエストが送信されました。"
             elif response.status_code == 404:
@@ -69,8 +66,8 @@ async def translate(data: dict):
 
     except requests.exceptions.RequestException as e:
         # リクエストに関するエラーのハンドリング
-        return create_error_response(500, "外部APIへのリクエスト中にエラーが発生しました。")
+        return create_error_response("外部APIへのリクエスト中にエラーが発生しました。")
 
     except Exception as e:
         # その他の例外発生時のエラーハンドリング
-        return create_error_response(500, "予期しないエラーが発生しました。")
+        return create_error_response("予期しないエラーが発生しました。")
