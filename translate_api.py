@@ -1,15 +1,14 @@
 from fastapi import FastAPI
 import requests
-
 app = FastAPI()
 
 # 対応する言語リスト
 supported_languages = ['en', 'ja']
 
-def create_error_response(status_code: int, detail: str):
-    error_response = {"status": f"error:{status_code}", "message": detail}
-    print(error_response)
-    return error_response, status_code
+def create_error_response(detail: str):
+    error_response = {"status": f"error", "message": detail}
+    print(error_response)  # エラーレスポンスを出力
+    return error_response
 
 # 自作のAPIのエンドポイント
 @app.post("/translate")
@@ -17,17 +16,17 @@ async def translate(data: dict):
     target_lang = data.get("target_lang")
     text = data.get("text")
 
-    if target_lang == "ja":
-        lang = "日本語"
-    elif target_lang == "en":
-        lang = "英語"
+    # target_langが未入力の場合
+    if not target_lang:
+        return create_error_response(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
 
-    request_text = f'''
-    以下のテキストを{lang}に翻訳してください。
-    ただし、メンションやメールアドレスと想定されるものは翻訳しないでください。
+    # 対応していない言語がリクエストされた場合
+    if target_lang not in supported_languages:
+        return create_error_response(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
 
-    {text}
-    '''
+    # 翻訳するテキストが未入力の場合
+    if not text:
+        return create_error_response(400, "textを入力してください。")
 
     # モックAPIのURL（モックAPIにリクエストを転送）
     mock_api_url = "http://localhost:8001/v1/chat/completions"
@@ -35,9 +34,9 @@ async def translate(data: dict):
     try:
         # モックAPIに転送するデータを整形
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-3.5-turbo",  # 使いたいモデル名
             "messages": [
-                {"role": "user", "content": request_text}
+                {"role": "user", "content": text}
             ]
         }
 
@@ -51,7 +50,27 @@ async def translate(data: dict):
         if response.status_code == 200:
             translated_text = response_data["choices"][0]["message"]["content"]
             return {"status": "success", "translated_text": translated_text}
-        
+        else:
+            # ステータスコードに応じたエラーメッセージを設定
+            if response.status_code == 400:
+                error_message = "外部APIに不正なリクエストが送信されました。"
+            elif response.status_code == 404:
+                error_message = "外部APIのエンドポイントが見つかりません。"
+            elif response.status_code == 500:
+                error_message = "外部APIで内部サーバーエラーが発生しました。"
+            elif response.status_code == 502:
+                error_message = "外部APIのゲートウェイエラーが発生しました。"
+            elif response.status_code == 503:
+                error_message = "外部APIが一時的に利用できません。"
+            else:
+                error_message = "外部APIでエラーが発生しました。"
+
+            return create_error_response(error_message)
+
+    except requests.exceptions.RequestException as e:
+        # リクエストに関するエラーのハンドリング
+        return create_error_response(500, "外部APIへのリクエスト中にエラーが発生しました。")
+
     except Exception as e:
         # その他の例外発生時のエラーハンドリング
         return create_error_response(500, "予期しないエラーが発生しました。")
