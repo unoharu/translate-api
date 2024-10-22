@@ -1,41 +1,60 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import requests
 
 app = FastAPI()
 
-# 対応する言語リスト
 supported_languages = ['en', 'ja']
 
-def create_error_response(status_code: int, detail: str):
-    error_response = {"status": f"error:{status_code}", "message": detail}
-    print(error_response)
-    return error_response, status_code
+class TranslationRequest(BaseModel):
+    text: str
+    target_lang: str
 
-# 自作のAPIのエンドポイント
+class TranslationError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+
+@app.exception_handler(TranslationError)
+async def translation_error_handler(request: Request, exc: TranslationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": "error", "error_message": exc.detail}
+    )
+
 @app.post("/translate")
-async def translate(data: dict):
-    target_lang = data.get("target_lang")
-    text = data.get("text")
-
-    if target_lang == "ja":
-        lang = "日本語"
-    elif target_lang == "en":
-        lang = "英語"
-
-    request_text = f'''
-    以下のテキストを{lang}に翻訳してください。
-    ただし、メンションやメールアドレスと想定されるものは翻訳しないでください。
-
-    {text}
-    '''
-
-    # モックAPIのURL（モックAPIにリクエストを転送）
-    mock_api_url = "http://localhost:8001/v1/chat/completions"
-
+def translate_text(data: TranslationRequest):
+    target_lang = data.target_lang
+    text = data.text
+    
     try:
+        if not text and not target_lang:
+            raise TranslationError(400, f"本文と言語が指定されていません。本文と{supported_languages} のいずれかを指定してください。")
+
+        if not target_lang:
+            raise TranslationError(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
+
+        if target_lang not in supported_languages:
+            raise TranslationError(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
+
+        if not text:
+            raise TranslationError(400, "本文を入力してください。")
+
+        # モックAPIのURL（モックAPIにリクエストを転送）
+        mock_api_url = "http://localhost:8001/v1/chat/completions"
+
+        request_text = f'''
+            {target_lang}に翻訳してください。
+            ただし、slackからの文章なのでメンションやメールアドレス、リンクなど特別な意味を持つものは変換しないでください。
+            
+            ↓翻訳対象のテキスト↓
+            {text}
+        '''
+
         # モックAPIに転送するデータを整形
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": "gpt-3.5-turbo",  # 使いたいモデル名
             "messages": [
                 {"role": "user", "content": request_text}
             ]
@@ -51,7 +70,12 @@ async def translate(data: dict):
         if response.status_code == 200:
             translated_text = response_data["choices"][0]["message"]["content"]
             return {"status": "success", "translated_text": translated_text}
-        
-    except Exception as e:
-        # その他の例外発生時のエラーハンドリング
-        return create_error_response(500, "予期しないエラーが発生しました。")
+
+    except requests.exceptions.RequestException:
+        raise TranslationError(500, "外部APIへのリクエスト中にエラーが発生しました。")
+
+    except TranslationError as e:
+        raise e
+
+    except Exception:
+        raise TranslationError(500, "予期しないエラーが発生しました。")
