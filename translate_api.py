@@ -5,7 +5,6 @@ import requests
 
 app = FastAPI()
 
-# 対応する言語リスト
 supported_languages = ['en', 'ja']
 
 class TranslationRequest(BaseModel):
@@ -30,19 +29,15 @@ def translate_text(data: TranslationRequest):
     text = data.text
     
     try:
-        # textとtarget_langの両方が未入力の場合
         if not text and not target_lang:
             raise TranslationError(400, f"本文と言語が指定されていません。本文と{supported_languages} のいずれかを指定してください。")
 
-        # target_langが未入力の場合
         if not target_lang:
             raise TranslationError(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
 
-        # 対応していない言語がリクエストされた場合
         if target_lang not in supported_languages:
             raise TranslationError(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
 
-        # 翻訳するテキストが未入力の場合
         if not text:
             raise TranslationError(400, "本文を入力してください。")
 
@@ -77,12 +72,10 @@ def translate_text(data: TranslationRequest):
             return {"status": "success", "translated_text": translated_text}
 
     except requests.exceptions.RequestException:
-        # リクエストに関するエラーのハンドリング
         raise TranslationError(500, "外部APIへのリクエスト中にエラーが発生しました。")
 
     except TranslationError as e:
         raise e
 
     except Exception:
-        # その他の例外発生時のエラーハンドリング
         raise TranslationError(500, "予期しないエラーが発生しました。")
