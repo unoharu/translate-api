@@ -32,7 +32,7 @@ def translate_text(data: TranslationRequest):
     try:
         # textとtarget_langの両方が未入力の場合
         if not text and not target_lang:
-            raise TranslationError(400, f"textとtarget_langの両方が指定されていません。textと{supported_languages} のいずれかを指定してください。")
+            raise TranslationError(400, f"本文と言語が指定されていません。本文と{supported_languages} のいずれかを指定してください。")
 
         # target_langが未入力の場合
         if not target_lang:
@@ -44,16 +44,24 @@ def translate_text(data: TranslationRequest):
 
         # 翻訳するテキストが未入力の場合
         if not text:
-            raise TranslationError(400, "textを入力してください。")
+            raise TranslationError(400, "本文を入力してください。")
 
         # モックAPIのURL（モックAPIにリクエストを転送）
         mock_api_url = "http://localhost:8001/v1/chat/completions"
+
+        request_text = f'''
+            {target_lang}に翻訳してください。
+            ただし、slackからの文章なのでメンションやメールアドレス、リンクなど特別な意味を持つものは変換しないでください。
+            
+            ↓翻訳対象のテキスト↓
+            {text}
+        '''
 
         # モックAPIに転送するデータを整形
         payload = {
             "model": "gpt-3.5-turbo",  # 使いたいモデル名
             "messages": [
-                {"role": "user", "content": text}
+                {"role": "user", "content": request_text}
             ]
         }
 
@@ -67,21 +75,6 @@ def translate_text(data: TranslationRequest):
         if response.status_code == 200:
             translated_text = response_data["choices"][0]["message"]["content"]
             return {"status": "success", "translated_text": translated_text}
-        else:
-            if response.status_code == 400:
-                error_message = "外部APIに不正なリクエストが送信されました。"
-            elif response.status_code == 404:
-                error_message = "外部APIのエンドポイントが見つかりません。"
-            elif response.status_code == 500:
-                error_message = "外部APIで内部サーバーエラーが発生しました。"
-            elif response.status_code == 502:
-                error_message = "外部APIのゲートウェイエラーが発生しました。"
-            elif response.status_code == 503:
-                error_message = "外部APIが一時的に利用できません。"
-            else:
-                error_message = "外部APIでエラーが発生しました。"
-
-            raise TranslationError(response.status_code, error_message)
 
     except requests.exceptions.RequestException:
         # リクエストに関するエラーのハンドリング
