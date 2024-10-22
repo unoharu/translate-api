@@ -56,6 +56,7 @@ def translate_text(data: TranslationRequest):
         payload = {
             "model": "gpt-3.5-turbo",  # 使いたいモデル名
             "messages": [
+                {"role": "system","content": "あなたは通訳者です。"},
                 {"role": "user", "content": request_text}
             ]
         }
