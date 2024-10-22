@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import requests
 
 app = FastAPI()
@@ -6,30 +8,47 @@ app = FastAPI()
 # 対応する言語リスト
 supported_languages = ['en', 'ja']
 
-def create_error_response(detail):
-    return {"status": "error", "message": detail}
+class TranslationRequest(BaseModel):
+    text: str
+    target_lang: str
+
+class TranslationError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+
+@app.exception_handler(TranslationError)
+async def translation_error_handler(request: Request, exc: TranslationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"status": "error", "error_message": exc.detail}
+    )
 
 @app.post("/translate")
-def translate_text(data: dict):
-    target_lang = data.get("target_lang")
-    text = data.get("text")
-
-    # target_langが未入力の場合
-    if not target_lang:
-        return create_error_response(f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
-
-    # 対応していない言語がリクエストされた場合
-    if target_lang not in supported_languages:
-        return create_error_response(f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
-
-    # 翻訳するテキストが未入力の場合
-    if not text:
-        return create_error_response("textを入力してください。")
-
-    # モックAPIのURL（モックAPIにリクエストを転送）
-    mock_api_url = "http://localhost:8001/v1/chat/completions"
-
+def translate_text(data: TranslationRequest):
+    target_lang = data.target_lang
+    text = data.text
+    
     try:
+        # textとtarget_langの両方が未入力の場合
+        if not text and not target_lang:
+            raise TranslationError(400, f"textとtarget_langの両方が指定されていません。textと{supported_languages} のいずれかを指定してください。")
+
+        # target_langが未入力の場合
+        if not target_lang:
+            raise TranslationError(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
+
+        # 対応していない言語がリクエストされた場合
+        if target_lang not in supported_languages:
+            raise TranslationError(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
+
+        # 翻訳するテキストが未入力の場合
+        if not text:
+            raise TranslationError(400, "textを入力してください。")
+
+        # モックAPIのURL（モックAPIにリクエストを転送）
+        mock_api_url = "http://localhost:8001/v1/chat/completions"
+
         # モックAPIに転送するデータを整形
         payload = {
             "model": "gpt-3.5-turbo",  # 使いたいモデル名
@@ -62,12 +81,15 @@ def translate_text(data: dict):
             else:
                 error_message = "外部APIでエラーが発生しました。"
 
-            return create_error_response(error_message)
+            raise TranslationError(response.status_code, error_message)
 
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         # リクエストに関するエラーのハンドリング
-        return create_error_response("外部APIへのリクエスト中にエラーが発生しました。")
+        raise TranslationError(500, "外部APIへのリクエスト中にエラーが発生しました。")
 
-    except Exception as e:
+    except TranslationError as e:
+        raise e
+
+    except Exception:
         # その他の例外発生時のエラーハンドリング
-        return create_error_response("予期しないエラーが発生しました。")
+        raise TranslationError(500, "予期しないエラーが発生しました。")
