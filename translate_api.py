@@ -40,15 +40,25 @@ def translate_text(data: TranslationRequest):
 
         if not text:
             raise TranslationError(400, "本文を入力してください。")
+        
+        if text == "ja":
+            trans_lang = "日本語"
+        elif text == "en":
+            trans_lang = "英語"
 
         # モックAPIのURL（モックAPIにリクエストを転送）
         mock_api_url = "http://localhost:8001/v1/chat/completions"
 
-        request_text = f'''
-            {target_lang}に翻訳してください。
-            ただし、slackからの文章なのでメンションやメールアドレス、リンクなど特別な意味を持つものは変換しないでください。
+        request_system_text = f'''
+            あなたは通訳者です。
+            文章を自然に翻訳し解答します。
+            説明は必要ないので、翻訳した文章のみ出力してください。
+        '''
+
+        request_user_text = f'''
+            以下の文章を{trans_lang}に翻訳してください。
+            ただし、メンションやメールアドレス、リンクなど特別な意味を持つものは変換しないでください。
             
-            ↓翻訳対象のテキスト↓
             {text}
         '''
 
@@ -56,8 +66,8 @@ def translate_text(data: TranslationRequest):
         payload = {
             "model": "gpt-3.5-turbo",  # 使いたいモデル名
             "messages": [
-                {"role": "system","content": "あなたは通訳者です。"},
-                {"role": "user", "content": request_text}
+                {"role": "system","content": request_system_text},
+                {"role": "user", "content": request_user_text}
             ]
         }
 
