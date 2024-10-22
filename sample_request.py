@@ -3,7 +3,7 @@ import requests
 
 app = FastAPI()
 
-url = "http://localhost:8000/trante" 
+url = "http://localhost:8000/translate" 
 
 data = {
     "text": "Hello, World!",
