@@ -1,9 +1,14 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 import openai
 import os
 from dotenv import load_dotenv
+import logging
+import json
+
+# ログ設定
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -14,10 +19,6 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 app = FastAPI()
 
 supported_languages = ['en', 'ja']
-
-class TranslationRequest(BaseModel):
-    text: str
-    target_lang: str
 
 class TranslationError(Exception):
     def __init__(self, status_code: int, detail: str):
@@ -32,21 +33,35 @@ async def translation_error_handler(request: Request, exc: TranslationError):
     )
 
 @app.post("/translate")
-async def translate_text(data: TranslationRequest):
-    target_lang = data.target_lang
-    text = data.text
-    
+async def translate_text(text: str = Form(...)):
     try:
+        logger.info(f"Received text: {text}")
+
+        # 言語コードを抽出
+        if text.endswith('en'):
+            target_lang = 'en'
+            text = text[:-2].strip()
+        elif text.endswith('ja'):
+            target_lang = 'ja'
+            text = text[:-2].strip()
+        else:
+            logger.error("言語コードが見つかりません。")
+            raise TranslationError(400, f"言語コードが見つかりません。{supported_languages} のいずれかを指定してください。")
+
         if not text and not target_lang:
+            logger.error("本文と言語が指定されていません。")
             raise TranslationError(400, f"本文と言語が指定されていません。本文と{supported_languages} のいずれかを指定してください。")
 
         if not target_lang:
+            logger.error("言語が指定されていません。")
             raise TranslationError(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
 
         if target_lang not in supported_languages:
+            logger.error(f"{target_lang} は対応していない言語です。")
             raise TranslationError(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
 
         if not text:
+            logger.error("本文を入力してください。")
             raise TranslationError(400, "本文を入力してください。")
         
         if target_lang == "ja":
@@ -68,6 +83,8 @@ async def translate_text(data: TranslationRequest):
             f"{text}"
         )
 
+        logger.info(f"Requesting translation for text: {text} to {trans_lang}")
+
         # OpenAI APIにリクエストを送信
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -79,13 +96,17 @@ async def translate_text(data: TranslationRequest):
 
         # OpenAI APIからのレスポンスを取得
         translated_text = response['choices'][0]['message']['content']
+        logger.info(f"Translated text: {translated_text}")
         return {"status": "success", "translated_text": translated_text}
 
     except openai.error.OpenAIError as e:
+        logger.error(f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
         raise TranslationError(500, f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
 
     except TranslationError as e:
+        logger.error(f"Translation error: {str(e)}")
         raise e
 
     except Exception as e:
+        logger.error(f"予期しないエラーが発生しました: {str(e)}")
         raise TranslationError(500, f"予期しないエラーが発生しました: {str(e)}")
