@@ -1,10 +1,9 @@
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 import openai
 import os
 from dotenv import load_dotenv
 import logging
-import json
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -74,8 +73,7 @@ async def translate_text(text: str = Form(...)):
             "あなたはslackから送られてきた文章を自然に翻訳し丁寧語で解答します。\n"
             "説明は必要ないので、翻訳した文章のみ出力してください。\n"
             "マークアップ内の文章も翻訳対象です。\n"
-            "ただし、メンションとリンクは翻訳対象外です。\n"
-            "また、プログラムだと思われる部分は翻訳せず、`で囲んでください。\n"
+            "ただし、コードブロックは変換しないでください。\n"
         )
 
         request_user_text = (
@@ -97,7 +95,7 @@ async def translate_text(text: str = Form(...)):
         # OpenAI APIからのレスポンスを取得
         translated_text = response['choices'][0]['message']['content']
         logger.info(f"Translated text: {translated_text}")
-        return {"status": "success", "translated_text": translated_text}
+        return PlainTextResponse(translated_text)
 
     except openai.error.OpenAIError as e:
         logger.error(f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
