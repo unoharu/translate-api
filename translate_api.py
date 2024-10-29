@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, PlainTextResponse
 import openai
 import os
 from dotenv import load_dotenv
 import logging
+import httpx
 
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -16,8 +17,6 @@ load_dotenv()
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 app = FastAPI()
-
-supported_languages = ['en', 'ja']
 
 class TranslationError(Exception):
     def __init__(self, status_code: int, detail: str):
@@ -32,60 +31,48 @@ async def translation_error_handler(request: Request, exc: TranslationError):
     )
 
 @app.post("/translate")
-async def translate_text(text: str = Form(...)):
+async def translate_text(
+    background_tasks: BackgroundTasks,
+    text: str = Form(...),
+    response_url: str = Form(...),
+    user_id: str = Form(...)
+    ):
+    logger.info(f"Received text from user ({user_id}): {text}")
+
+    if not text:
+        logger.error("エラーが発生しました。本文を入力してください。")
+        await send_error(response_url, "エラーが発生しました。本文を入力してください。")
+        raise TranslationError(400, "本文を入力してください。")
+
+    background_tasks.add_task(process_translation, text, response_url, user_id)
+    return JSONResponse(
+    content={
+        "response_type": "ephemeral",
+        "text": f"翻訳を開始しました"
+    }
+)
+
+async def process_translation(text: str, response_url: str, user_id: str):
     try:
-        logger.info(f"Received text: {text}")
-
-        # 言語コードを抽出
-        if text.endswith('en'):
-            target_lang = 'en'
-            text = text[:-2].strip()
-        elif text.endswith('ja'):
-            target_lang = 'ja'
-            text = text[:-2].strip()
-        else:
-            logger.error("言語コードが見つかりません。")
-            raise TranslationError(400, f"言語コードが見つかりません。{supported_languages} のいずれかを指定してください。")
-
-        if not text and not target_lang:
-            logger.error("本文と言語が指定されていません。")
-            raise TranslationError(400, f"本文と言語が指定されていません。本文と{supported_languages} のいずれかを指定してください。")
-
-        if not target_lang:
-            logger.error("言語が指定されていません。")
-            raise TranslationError(400, f"言語が指定されていません。{supported_languages} のいずれかを指定してください。")
-
-        if target_lang not in supported_languages:
-            logger.error(f"{target_lang} は対応していない言語です。")
-            raise TranslationError(400, f"{target_lang} は対応していない言語です。{supported_languages}のいずれかを指定してください。")
-
-        if not text:
-            logger.error("本文を入力してください。")
-            raise TranslationError(400, "本文を入力してください。")
-        
-        if target_lang == "ja":
-            trans_lang = "日本語"
-        elif target_lang == "en":
-            trans_lang = "英語"
-
         request_system_text = (
             "あなたは通訳者です。\n"
             "あなたはslackから送られてきた文章を自然に翻訳し丁寧語で解答します。\n"
             "説明は必要ないので、翻訳した文章のみ出力してください。\n"
             "マークアップ内の文章も翻訳対象です。\n"
-            "ただし、コードブロックは変換しないでください。\n"
+            "ただし、コードブロック内は翻訳しないでください。\n"
+            "また改行も変更しないでください。"
         )
 
         request_user_text = (
-            f"以下の文章を{trans_lang}に翻訳してください。\n\n"
+            f"以下の文章を英語または日本語に翻訳してください。\n\n"
             f"{text}"
         )
 
-        logger.info(f"Requesting translation for text: {text} to {trans_lang}")
+        logger.info(f"Requesting translation for text: {text}")
 
         # OpenAI APIにリクエストを送信
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": request_system_text},
                 {"role": "user", "content": request_user_text}
@@ -95,16 +82,32 @@ async def translate_text(text: str = Form(...)):
         # OpenAI APIからのレスポンスを取得
         translated_text = response['choices'][0]['message']['content']
         logger.info(f"Translated text: {translated_text}")
-        return PlainTextResponse(translated_text)
+
+        # 翻訳結果をSlackに送信
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                response_url,
+                json={
+                    "text": f"*↓<@{user_id}>さんのメッセージ↓*\n{text}\n\n\n*↓翻訳されたメッセージ↓*\n\n\n{translated_text}",
+                    "response_type": "in_channel"
+                }
+            )
+
 
     except openai.error.OpenAIError as e:
         logger.error(f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
-        raise TranslationError(500, f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
-
-    except TranslationError as e:
-        logger.error(f"Translation error: {str(e)}")
-        raise e
+        await send_error(response_url, f"OpenAI APIへのリクエスト中にエラーが発生しました: {str(e)}")
 
     except Exception as e:
         logger.error(f"予期しないエラーが発生しました: {str(e)}")
-        raise TranslationError(500, f"予期しないエラーが発生しました: {str(e)}")
+        await send_error(response_url, f"予期しないエラーが発生しました: {str(e)}")
+
+async def send_error(response_url: str, error_message: str):
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            response_url,
+            json={
+                "text": error_message,
+                "as_user": True
+            }
+        )

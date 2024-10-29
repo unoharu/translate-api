@@ -1,16 +1,12 @@
-from fastapi import FastAPI
 import requests
 
-app = FastAPI()
-
-url = "http://localhost:8000/translate" 
+url = "http://localhost:8000/translate"  # 正しいエンドポイント
 
 data = {
-    "text": "Hello, World!",
-    "target_lang": "ja"
+    "text": "Hello, World! ja"  # 言語コードを含むテキスト
 }
 
-response = requests.post(url, json=data)
+response = requests.post(url, data=data)  # フォームデータとして送信
 
-# レスポンスの内容を表示
-print(response.json())
+print(response.status_code)
+print(response.text)  # プレーンテキストとしてレスポンスを表示
